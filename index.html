@@ -16,6 +16,11 @@ details{margin-top:12px}.weekly-panel>.row{margin-top:10px}td,th{padding:6px 8px
 <main>
 <header><h1>Contador de horas</h1>Resumo semanal e quadrimestral</header>
 <section><h2>Importar espelho de ponto</h2>
+<details><summary>Importar da extensão Chrome</summary>
+<form id="extension-import">
+<label>Registros copiados da extensão<textarea id="extension-payload" rows="3" required></textarea></label>
+<p><button type="submit">Importar registros</button></p>
+</form></details>
 <form id="upload" class="row"><label>PDF<input id="file" type="file" accept=".pdf,application/pdf" required></label><label>Ano quando omitido no PDF<input id="year" type="number" min="1900" max="9999" required></label><button id="read">Ler PDF</button></form>
 <p><small>Use um PDF com texto selecionável. Confira as datas reconhecidas antes de confirmar a importação. Datas já cadastradas são ignoradas.</small></p>
 <p id="status" role="status"></p><div id="review" hidden><div class="scroll" id="preview"></div><p><button id="confirm" type="button">Confirmar importação</button> <button id="cancel" type="button">Cancelar</button></p></div>
@@ -315,6 +320,27 @@ el('confirm').onclick = () => {
   status(count+' dia(s) salvo(s) neste navegador.');
   render();
 };
+el('extension-import').onsubmit = event => {
+  event.preventDefault();
+  try {
+    const payload = JSON.parse(el('extension-payload').value);
+    if (payload.formato !== 'contador-horas-pontos' || !Array.isArray(payload.registros) || !payload.registros.length ||
+        !payload.registros.every(day => day && typeof day.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(day.date) &&
+          iso(local(day.date)) === day.date && typeof day.type === 'string' &&
+          Array.isArray(day.values) && day.values.length === 7 && day.values.every(value => Number.isFinite(value) && value >= 0))) {
+      throw new Error('Formato inválido');
+    }
+    const days = {...data.days};
+    for (const day of payload.registros) days[day.date] = day;
+    save({...data, days});
+    el('extension-payload').value = '';
+    render();
+    status(new Set(payload.registros.map(day => day.date)).size + ' dia(s) importado(s) da extensão.');
+  } catch {
+    status('Não foi possível importar. Copie os registros novamente pelo ícone da extensão.');
+  }
+};
+
 function clearHistory(month = '') {
   const keep = Object.entries(data.days).filter(([date]) => month && !date.startsWith(month + '-'));
   if (keep.length === Object.keys(data.days).length) return;
@@ -362,4 +388,3 @@ document.addEventListener('contador-horas-sync', () => {
   status('Registros sincronizados com o Ponto Digital.');
 });
 </script></html>
-

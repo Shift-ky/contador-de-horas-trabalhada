@@ -1,12 +1,34 @@
 {
   "manifest_version": 3,
   "name": "Contador de Horas — Ponto Digital",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "description": "Sincroniza sua tabela de ponto com o Contador de Horas local.",
-  "permissions": ["storage"], "action": {"default_title": "Contador de Horas — aguardando o Ponto Digital"},
-  "background": {"service_worker": "sync.js"},
+  "permissions": [
+    "storage"
+  ],
+  "action": {
+    "default_title": "Contador de Horas — aguardando o Ponto Digital",
+    "default_popup": "transfer.html"
+  },
+  "background": {
+    "service_worker": "sync.js"
+  },
   "content_scripts": [
-    {"matches": ["https://procfit.cosmospro.com.br/private/digital-point/*"], "js": ["portal.js"]},
-    {"matches": ["file:///*"], "js": ["contador.js"]}
+    {
+      "matches": [
+        "https://procfit.cosmospro.com.br/private/digital-point/*"
+      ],
+      "js": [
+        "portal.js"
+      ]
+    },
+    {
+      "matches": [
+        "file:///*"
+      ],
+      "js": [
+        "contador.js"
+      ]
+    }
   ]
 }
