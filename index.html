@@ -23,7 +23,7 @@ details{margin-top:12px}.weekly-panel>.row{margin-top:10px}td,th{padding:6px 8px
 <section><h2>Resumo da jornada</h2>
 <p><small>A meta considera os dias com jornada nos registros salvos. Feriado, DSR, folga, dia compensado e dia de trabalho em aberto têm meta zero. As extras de sábado e domingo são somadas no campo Horas extras de sábado.</small></p>
 <div class="summaries">
-<div class="summary"><h2>Quadrimestre</h2><p id="term-range"></p><div class="metrics" id="term-metrics"></div></div><details class="summary weekly-panel"><summary>Semanal</summary><div class="row">
+<div class="summary"><h2>Quadrimestre</h2><p id="term-range"></p><div class="metrics" id="term-metrics"></div></div><details class="summary weekly-panel"><summary>Mensal</summary><div id="months"></div></details><details class="summary weekly-panel"><summary>Semanal</summary><div class="row">
 
 <label>Mês<select id="filter-month"></select></label><label>Ano<input id="filter-year" type="number" min="1900" max="9999" required></label>
 <label>Meta diária<input id="goal" type="time" value="08:00"></label>
@@ -159,6 +159,15 @@ function render() {
   const month = Number(el('filter-month').value);
   const term = currentTerm();
   renderSummary(el('term-range'), el('term-metrics'), term.start, term.end);
+  const monthlyPanel = el('months');
+  monthlyPanel.replaceChildren();
+  for (let month = term.start.getMonth(); month <= term.end.getMonth(); month++) {
+    const year = term.start.getFullYear();
+    const start = new Date(year, month, 1);
+    const end = new Date(year, month + 1, 0);
+    const title = start.toLocaleDateString('pt-BR', {month:'long', year:'numeric'});
+    appendPeriod(monthlyPanel, title, start, end);
+  }
 
   const first = new Date(year, month, 1);
   const last = new Date(year, month + 1, 0);
@@ -168,16 +177,7 @@ function render() {
   for (let start = first; start <= last;) {
     const saturday = new Date(year, month, start.getDate() + (6 - start.getDay()));
     const end = saturday < last ? saturday : last;
-    const week = document.createElement('div');
-    week.className = 'week';
-    const heading = document.createElement('h3');
-    heading.textContent = 'Semana ' + number++;
-    const range = document.createElement('p');
-    const metrics = document.createElement('div');
-    metrics.className = 'metrics';
-    week.append(heading, range, metrics);
-    weeks.append(week);
-    renderSummary(range, metrics, start, end);
+    appendPeriod(weeks, 'Semana ' + number++, start, end);
     start = new Date(year, month, end.getDate() + 1);
   }
   const history = Object.values(data.days).sort((a,b) => a.date.localeCompare(b.date));
@@ -193,6 +193,19 @@ function render() {
   if (months.includes(selected)) monthSelect.value = selected;
   monthSelect.disabled = el('clear-selected-month').disabled = el('clear-history').disabled = !months.length;
   renderHistory(history);
+}
+
+function appendPeriod(panel, title, start, end) {
+  const period = document.createElement('div');
+  period.className = 'week';
+  const heading = document.createElement('h3');
+  heading.textContent = title;
+  const range = document.createElement('p');
+  const metrics = document.createElement('div');
+  metrics.className = 'metrics';
+  period.append(heading, range, metrics);
+  panel.append(period);
+  renderSummary(range, metrics, start, end);
 }
 
 function renderSummary(range, metrics, start, end) {
@@ -349,3 +362,4 @@ document.addEventListener('contador-horas-sync', () => {
   status('Registros sincronizados com o Ponto Digital.');
 });
 </script></html>
+
