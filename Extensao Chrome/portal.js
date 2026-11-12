@@ -52,7 +52,29 @@ async function sync() {
     inFlight = false;
   }
 }
-function check() { sync().catch(error => console.warn('Contador de Horas:', error)); }
+function stopChecking() {
+  clearInterval(timer);
+  document.removeEventListener('visibilitychange', onVisibilityChange);
+}
+
+function check() {
+  if (!globalThis.chrome?.runtime?.id) {
+    stopChecking();
+    return;
+  }
+  sync().catch(error => {
+    if (!globalThis.chrome?.runtime?.id || /extension context invalidated/i.test(error.message)) {
+      stopChecking();
+      return;
+    }
+    console.warn('Contador de Horas:', error);
+  });
+}
+
+function onVisibilityChange() {
+  if (!document.hidden) check();
+}
+
+const timer = setInterval(check, 15000);
+document.addEventListener('visibilitychange', onVisibilityChange);
 check();
-setInterval(check, 15000);
-document.addEventListener('visibilitychange', () => { if (!document.hidden) check(); });
