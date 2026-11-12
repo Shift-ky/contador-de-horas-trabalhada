@@ -1,0 +1,351 @@
+<!doctype html><html lang="pt-BR"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Contador de horas</title><meta name="contador-horas-sync" content="1">
+<style>
+*{box-sizing:border-box}body{margin:0;background:#eef3f6;color:#19324a;font:16px "Segoe UI",sans-serif}main{max-width:1680px;margin:auto;padding:clamp(8px,1.2vw,20px)}header,section{padding:clamp(12px,1.5vw,24px);border-radius:16px;margin-bottom:16px}header{background:#143550;color:white}h1,h2{margin:0 0 12px}section{background:white;border:1px solid #d7e1ea}.row,.metrics{display:flex;gap:12px;flex-wrap:wrap;align-items:end}label{display:grid;gap:5px}button,input,select{font:inherit;padding:8px;border:1px solid #aab9c9;border-radius:8px}button{background:#146659;color:white;cursor:pointer}button:disabled{opacity:.5}.metrics div{flex:1 1 135px;background:#eef7f5;padding:14px;border-radius:10px}strong{display:block;font-size:1.6rem}small{color:#486076}.scroll{overflow:auto}table{width:100%;border-collapse:collapse;white-space:nowrap}td,th{text-align:left;padding:8px;border-bottom:1px solid #dce6ec}
+.summaries{display:grid;grid-template-columns:minmax(0,1fr);gap:16px;margin-top:18px}.summary{min-width:0;border:1px solid #d7e1ea;border-radius:12px;padding:16px}details{margin-top:18px}summary{cursor:pointer;font-weight:600}.metrics{gap:8px;display:grid;grid-template-columns:repeat(7,minmax(112px,1fr));align-items:stretch;overflow-x:auto}.metrics>div{padding:12px;display:flex;flex-direction:column;justify-content:space-between;gap:6px;overflow-wrap:anywhere}tfoot{font-weight:600;background:#eef7f5}.week+.week{margin-top:16px;padding-top:12px;border-top:1px solid #d7e1ea}.weekly-panel{margin-top:0}.weekly-panel>summary{font-size:1.5em;font-weight:700}.weekly-panel>.row{margin-top:14px}
+header,section{padding:clamp(10px,1.25vw,18px);margin-bottom:12px}
+h1{font-size:1.45rem;margin-bottom:4px}h2,.weekly-panel>summary{font-size:1.2rem}h2{margin-bottom:8px}
+section p{margin:8px 0}.summaries{gap:10px;margin-top:10px}.summary{padding:12px}
+.week h3{font-size:1rem;margin:10px 0 4px}.week+.week{margin-top:10px;padding-top:6px}
+.metrics{grid-template-columns:repeat(7,minmax(104px,1fr));gap:6px}
+.metrics>div{padding:9px;gap:5px;font-size:.875rem;line-height:1.25;overflow-wrap:normal}
+.metrics strong{font-size:1.12rem;font-variant-numeric:tabular-nums}
+label{gap:3px;font-size:.875rem}button,input,select{padding:6px 8px}
+details{margin-top:12px}.weekly-panel>.row{margin-top:10px}td,th{padding:6px 8px}
+</style>
+<main>
+<header><h1>Contador de horas</h1>Resumo semanal e quadrimestral</header>
+<section><h2>Importar espelho de ponto</h2>
+<form id="upload" class="row"><label>PDF<input id="file" type="file" accept=".pdf,application/pdf" required></label><label>Ano quando omitido no PDF<input id="year" type="number" min="1900" max="9999" required></label><button id="read">Ler PDF</button></form>
+<p><small>Use um PDF com texto selecionável. Confira as datas reconhecidas antes de confirmar a importação. Datas já cadastradas são ignoradas.</small></p>
+<p id="status" role="status"></p><div id="review" hidden><div class="scroll" id="preview"></div><p><button id="confirm" type="button">Confirmar importação</button> <button id="cancel" type="button">Cancelar</button></p></div>
+</section>
+<section><h2>Resumo da jornada</h2>
+<p><small>A meta considera os dias com jornada nos registros salvos. Feriado, DSR, folga, dia compensado e dia de trabalho em aberto têm meta zero. As extras de sábado e domingo são somadas no campo Horas extras de sábado.</small></p>
+<div class="summaries">
+<div class="summary"><h2>Quadrimestre</h2><p id="term-range"></p><div class="metrics" id="term-metrics"></div></div><details class="summary weekly-panel"><summary>Semanal</summary><div class="row">
+
+<label>Mês<select id="filter-month"></select></label><label>Ano<input id="filter-year" type="number" min="1900" max="9999" required></label>
+<label>Meta diária<input id="goal" type="time" value="08:00"></label>
+</div><div id="weeks"></div></details>
+</div>
+<details><summary>Registros de ponto</summary><div class="scroll" id="history"></div><details><summary>Opções de limpeza</summary><div class="row"><label>Mês<select id="clear-month"></select></label><button id="clear-selected-month" type="button">Excluir mês</button><button id="clear-history" type="button">Excluir tudo</button></div><p id="history-status" role="status"></p></details></details>
+</section>
+</main>
+<script>
+const el = id => document.getElementById(id);
+const status = message => { el('status').textContent = message; };
+const clock = minutes => {
+  const seconds = Math.round(minutes * 60);
+  return [Math.floor(seconds / 3600), Math.floor(seconds / 60) % 60, seconds % 60]
+    .map(value => String(value).padStart(2, '0')).join(':');
+};
+const minutes = text => { const [h,m] = text.split(':').map(Number); return 60*h+m; };
+const iso = d => [d.getFullYear(),d.getMonth()+1,d.getDate()].map(x => String(x).padStart(2,'0')).join('-');
+const local = s => new Date(s+'T12:00:00');
+const br = s => local(s).toLocaleDateString('pt-BR');
+const rest = type => /^(DSR|Feriado|Compensado|Folga)$/i.test(type);
+const openDay = day => /^diadetrabalho$/i.test(day.type) && day.values.every(value => value === 0);
+const key = 'contador-horas.v1';
+let data = { days: {}, goal: '08:00' };
+let pending = [];
+
+try { data = JSON.parse(localStorage.getItem(key)) || data; } catch { status('Dados locais indisponíveis.'); }
+
+function parse(items, year) {
+  const lines = [];
+  for (const item of items.filter(i => i.str?.trim()).sort((a,b) => b.transform[5]-a.transform[5])) {
+    const [x,y] = item.transform.slice(4);
+    if (!lines.length || Math.abs(lines.at(-1).y-y)>2) lines.push({y, cells:[]});
+    lines.at(-1).cells.push({x, text:item.str.trim()});
+  }
+  let header;
+  const rows = [];
+  let skipped = 0;
+  for (const {cells} of lines) {
+    cells.sort((a,b) => a.x-b.x);
+    const labels = cells.map(c => c.text.toLowerCase().replace(/[.\s]/g,''));
+    const indexes = ['trab','just','exc','inter','falt','folga'].map(label => labels.indexOf(label));
+    if (indexes.every(i => i>=0)) {
+      header = indexes.map(i => cells[i].x);
+      continue;
+    }
+    const match = cells[0]?.text.match(/^(\d{1,2})\/(\d{1,2})(?:\/(\d{4}))?$/);
+    if (!match || !header) continue;
+    const [,day,month,explicitYear] = match;
+    const date = [explicitYear || year,month.padStart(2,'0'),day.padStart(2,'0')].join('-');
+    const type = cells[1]?.text;
+    const durations = cells.slice(-7);
+    if (!type || iso(local(date))!==date || durations.length!==7 ||
+        !durations.every(c => /^\d{1,3}:[0-5]\d$/.test(c.text)) ||
+        ![0,1,2,3,4,6].every((i,j) => Math.abs(durations[i].x-header[j])<24)) {
+      skipped++;
+      continue;
+    }
+    rows.push({date,type,values:durations.map(c => minutes(c.text))});
+  }
+  return {rows,skipped};
+}
+
+function pointTable(rows, monthly = false) {
+  const table = document.createElement('table');
+  const header = table.createTHead().insertRow();
+  const fields = ['Data', ...(monthly ? ['Dia da semana'] : []), 'Tipo','Trab.','Just.','Exc.','Inter.','Falt.','Ad. Not.','Folga'];
+  for (const label of fields) {
+    const th = document.createElement('th');
+    th.scope = 'col';
+    th.textContent = label;
+    header.append(th);
+  }
+  const body = table.createTBody();
+  for (const day of rows) {
+    const row = body.insertRow();
+    const dateFields = [br(day.date)];
+    if (monthly) dateFields.push(local(day.date).toLocaleDateString('pt-BR', {weekday:'long'}));
+    for (const value of [...dateFields,day.type,...day.values.map(clock)]) row.insertCell().textContent = value;
+  }
+  if (monthly) {
+    const totals = table.createTFoot().insertRow();
+    const label = document.createElement('th');
+    label.scope = 'row';
+    label.colSpan = 3;
+    label.textContent = 'Total do mês';
+    totals.append(label);
+    for (let column = 0; column < 7; column++) {
+      totals.insertCell().textContent = clock(rows.reduce((sum, day) => sum + day.values[column], 0));
+    }
+  }
+  return table;
+}
+
+function table(target, rows) {
+  el(target).replaceChildren(...(rows.length ? [pointTable(rows)] : []));
+}
+
+function renderHistory(rows) {
+  const months = new Map();
+  for (const day of rows) {
+    const month = day.date.slice(0,7);
+    if (!months.has(month)) months.set(month, []);
+    months.get(month).push(day);
+  }
+  const groups = [...months.values()].map(days => {
+    const group = document.createElement('details');
+    const title = document.createElement('summary');
+    title.textContent = local(days[0].date).toLocaleDateString('pt-BR', {month:'long', year:'numeric'});
+    const scroll = document.createElement('div');
+    scroll.className = 'scroll';
+    scroll.append(pointTable(days, true));
+    group.append(title, scroll);
+    return group;
+  });
+  el('history').replaceChildren(...groups);
+  if (!groups.length) el('history').textContent = 'Nenhum registro salvo.';
+}
+function currentTerm(now = new Date()) {
+  const parts = new Intl.DateTimeFormat('pt-BR', {
+    timeZone: 'America/Fortaleza', year: 'numeric', month: 'numeric'
+  }).formatToParts(now);
+  const year = Number(parts.find(part => part.type === 'year').value);
+  const month = Number(parts.find(part => part.type === 'month').value) - 1;
+  const start = Math.floor(month / 4) * 4;
+  return { start: new Date(year, start, 1), end: new Date(year, start + 4, 0) };
+}
+
+function render() {
+  const yearInput = el('filter-year');
+  if (!yearInput.checkValidity() || !el('goal').value) return;
+  const year = Number(yearInput.value);
+  const month = Number(el('filter-month').value);
+  const term = currentTerm();
+  renderSummary(el('term-range'), el('term-metrics'), term.start, term.end);
+
+  const first = new Date(year, month, 1);
+  const last = new Date(year, month + 1, 0);
+  const weeks = el('weeks');
+  weeks.replaceChildren();
+  let number = 1;
+  for (let start = first; start <= last;) {
+    const saturday = new Date(year, month, start.getDate() + (6 - start.getDay()));
+    const end = saturday < last ? saturday : last;
+    const week = document.createElement('div');
+    week.className = 'week';
+    const heading = document.createElement('h3');
+    heading.textContent = 'Semana ' + number++;
+    const range = document.createElement('p');
+    const metrics = document.createElement('div');
+    metrics.className = 'metrics';
+    week.append(heading, range, metrics);
+    weeks.append(week);
+    renderSummary(range, metrics, start, end);
+    start = new Date(year, month, end.getDate() + 1);
+  }
+  const history = Object.values(data.days).sort((a,b) => a.date.localeCompare(b.date));
+  const monthSelect = el('clear-month');
+  const selected = monthSelect.value;
+  const months = [...new Set(history.map(day => day.date.slice(0, 7)))];
+  monthSelect.replaceChildren(...months.map(month => {
+    const option = document.createElement('option');
+    option.value = month;
+    option.textContent = local(month + '-01').toLocaleDateString('pt-BR', {month:'long', year:'numeric'});
+    return option;
+  }));
+  if (months.includes(selected)) monthSelect.value = selected;
+  monthSelect.disabled = el('clear-selected-month').disabled = el('clear-history').disabled = !months.length;
+  renderHistory(history);
+}
+
+function renderSummary(range, metrics, start, end) {
+  const rows = Object.values(data.days).filter(day => day.date>=iso(start) && day.date<=iso(end))
+    .sort((a,b) => a.date.localeCompare(b.date));
+  range.textContent = (iso(start)===iso(end) ? br(iso(start)) : br(iso(start))+' a '+br(iso(end)))+
+    ' · '+rows.length+' dia(s) salvo(s)';
+  const regularDays = rows.filter(day => { const weekday = local(day.date).getDay(); return weekday >= 1 && weekday <= 5; });
+  const weekendExtra = weekday => rows.filter(day => local(day.date).getDay() === weekday)
+    .reduce((total, day) => total + (day.values[2] || day.values[0]), 0);
+  const sum = i => regularDays.reduce((n,day) => n+day.values[i],0);
+  const worked = sum(0);
+  const goal = regularDays.filter(day => !rest(day.type) && !openDay(day)).length*minutes(el('goal').value);
+  const cards = [['Horas trabalhadas', worked], ['Jornada de trabalho', goal],
+    ['Horas excedentes', sum(2)], ['Horas faltantes', sum(4)],
+    ['Repor', Math.max(0, goal - worked)], ['Horas para folgar', Math.max(0, worked - goal)],
+    ['Horas extras de sábado', weekendExtra(6) + weekendExtra(0)]];
+  metrics.replaceChildren(...cards.map(([label,value]) => {
+    const card = document.createElement('div');
+    const amount = document.createElement('strong');
+    amount.textContent = rows.length ? clock(value) : '—';
+    card.append(label,amount);
+    return card;
+  }));
+}
+
+function save(next) {
+  localStorage.setItem(key,JSON.stringify(next));
+  data = next;
+}
+
+el('upload').addEventListener('submit',async event => {
+  event.preventDefault();
+  clearReview();
+  el('read').disabled = true;
+  status('Lendo o PDF…');
+  let pdf;
+  try {
+    const base = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/build/';
+    const lib = await import(base+'pdf.min.mjs');
+    lib.GlobalWorkerOptions.workerSrc = base+'pdf.worker.min.mjs';
+    pdf = await lib.getDocument({data:await el('file').files[0].arrayBuffer(),isEvalSupported:false}).promise;
+    const year = el('year').value;
+    const imported = [];
+    let skipped = 0;
+    for (let i=1;i<=pdf.numPages;i++) {
+      const page = await pdf.getPage(i);
+      const result = parse((await page.getTextContent()).items,year);
+      imported.push(...result.rows);
+      skipped += result.skipped;
+    }
+    if (!imported.length) throw new Error('Nenhuma linha reconhecida no formato do espelho de ponto.');
+    const unique = [...new Map(imported.map(day => [day.date, day])).values()];
+    pending = unique.filter(day => !Object.hasOwn(data.days, day.date))
+      .sort((a,b) => a.date.localeCompare(b.date));
+    const existing = unique.length - pending.length;
+    const notes = (existing ? ' Datas já cadastradas ignoradas: '+existing+'.' : '')+
+      (skipped ? ' Linhas não reconhecidas: '+skipped+'.' : '');
+    if (!pending.length) {
+      status('Nenhuma data nova para importar.'+notes);
+      return;
+    }
+    table('preview',pending);
+    el('review').hidden = false;
+    status(pending.length+' dia(s) novo(s) para confirmar.'+notes);
+  } catch (error) {
+    status('Falha na leitura. '+error.message);
+  } finally {
+    el('read').disabled = false;
+    if (pdf) await pdf.destroy();
+  }
+});
+
+function clearReview() {
+  pending = [];
+  el('review').hidden = true;
+  table('preview',[]);
+}
+
+el('cancel').onclick = () => {
+  clearReview();
+  status('Importação cancelada.');
+};
+
+el('confirm').onclick = () => {
+  if (!pending.length) return;
+  const days = {...data.days};
+  const added = pending.filter(day => !Object.hasOwn(days, day.date));
+  if (!added.length) {
+    clearReview();
+    status('Nenhuma data nova para importar.');
+    return;
+  }
+  for (const day of added) days[day.date] = day;
+  try {
+    save({...data,days});
+  } catch {
+    status('O navegador não permitiu salvar os dados. Tente confirmar novamente.');
+    return;
+  }
+  el('history-status').textContent = '';
+  const count = added.length;
+  const latest = local(added.at(-1).date);
+  el('filter-month').value = latest.getMonth();
+  el('filter-year').value = latest.getFullYear();
+  clearReview();
+  status(count+' dia(s) salvo(s) neste navegador.');
+  render();
+};
+function clearHistory(month = '') {
+  const keep = Object.entries(data.days).filter(([date]) => month && !date.startsWith(month + '-'));
+  if (keep.length === Object.keys(data.days).length) return;
+  const label = month ? local(month + '-01').toLocaleDateString('pt-BR', {month:'long', year:'numeric'}) : '';
+  const message = month ? 'Excluir os registros de ' + label + '?' : 'Excluir todos os registros de ponto?';
+  if (!window.confirm(message)) return;
+  try {
+    save({...data,days:Object.fromEntries(keep)});
+  } catch {
+    el('history-status').textContent = 'O navegador não permitiu apagar os registros.';
+    return;
+  }
+  render();
+  document.dispatchEvent(new CustomEvent('contador-horas-clear', {detail: month}));
+  el('history-status').textContent = month ? 'Registros de ' + label + ' excluídos.' : 'Todos os registros foram excluídos.';
+}
+
+el('clear-selected-month').onclick = () => {
+  const month = el('clear-month').value;
+  if (month) clearHistory(month);
+};
+el('clear-history').onclick = () => clearHistory();
+el('goal').onchange = () => {
+  if (!el('goal').value) return;
+  try { save({...data,goal:el('goal').value}); } catch { status('O navegador não permitiu salvar a meta.'); }
+  render();
+};
+const today = new Date();
+for (let month = 0; month < 12; month++) {
+  const option = document.createElement('option');
+  option.value = month;
+  option.textContent = new Date(2026, month, 1).toLocaleDateString('pt-BR', {month:'long'});
+  el('filter-month').append(option);
+}
+el('filter-month').value = today.getMonth();
+el('filter-year').value = today.getFullYear();
+el('filter-month').onchange = render;
+el('filter-year').onchange = render;
+el('year').value = new Date().getFullYear();
+el('goal').value = data.goal;
+render();
+document.addEventListener('contador-horas-sync', () => {
+  data = JSON.parse(localStorage.getItem(key)) || data;
+  render();
+  status('Registros sincronizados com o Ponto Digital.');
+});
+</script></html>
