@@ -2,16 +2,22 @@
 <title>Contador de horas</title><meta name="contador-horas-sync" content="1">
 <style>
 *{box-sizing:border-box}body{margin:0;background:#eef3f6;color:#19324a;font:16px "Segoe UI",sans-serif}main{max-width:1680px;margin:auto;padding:clamp(8px,1.2vw,20px)}header,section{padding:clamp(12px,1.5vw,24px);border-radius:16px;margin-bottom:16px}header{background:#143550;color:white}h1,h2{margin:0 0 12px}section{background:white;border:1px solid #d7e1ea}.row,.metrics{display:flex;gap:12px;flex-wrap:wrap;align-items:end}label{display:grid;gap:5px}button,input,select{font:inherit;padding:8px;border:1px solid #aab9c9;border-radius:8px}button{background:#146659;color:white;cursor:pointer}button:disabled{opacity:.5}.metrics div{flex:1 1 135px;background:#eef7f5;padding:14px;border-radius:10px}strong{display:block;font-size:1.6rem}small{color:#486076}.scroll{overflow:auto}table{width:100%;border-collapse:collapse;white-space:nowrap}td,th{text-align:left;padding:8px;border-bottom:1px solid #dce6ec}
-.summaries{display:grid;grid-template-columns:minmax(0,1fr);gap:16px;margin-top:18px}.summary{min-width:0;border:1px solid #d7e1ea;border-radius:12px;padding:16px}details{margin-top:18px}summary{cursor:pointer;font-weight:600}.metrics{gap:8px;display:grid;grid-template-columns:repeat(7,minmax(112px,1fr));align-items:stretch;overflow-x:auto}.metrics>div{padding:12px;display:flex;flex-direction:column;justify-content:space-between;gap:6px;overflow-wrap:anywhere}tfoot{font-weight:600;background:#eef7f5}.week+.week{margin-top:16px;padding-top:12px;border-top:1px solid #d7e1ea}.weekly-panel{margin-top:0}.weekly-panel>summary{font-size:1.5em;font-weight:700}.weekly-panel>.row{margin-top:14px}
+.summaries{display:grid;grid-template-columns:minmax(0,1fr);gap:16px;margin-top:18px}.summary{min-width:0;border:1px solid #d7e1ea;border-radius:12px;padding:16px}details{margin-top:18px}summary{cursor:pointer;font-weight:600}.metrics{gap:8px;display:grid;grid-template-columns:repeat(8,minmax(112px,1fr));align-items:stretch;overflow-x:auto}.metrics>div{padding:12px;display:flex;flex-direction:column;justify-content:space-between;gap:6px;overflow-wrap:anywhere}tfoot{font-weight:600;background:#eef7f5}.week+.week{margin-top:16px;padding-top:12px;border-top:1px solid #d7e1ea}.weekly-panel{margin-top:0}.weekly-panel>summary{font-size:1.5em;font-weight:700}.weekly-panel>.row{margin-top:14px}
 header,section{padding:clamp(10px,1.25vw,18px);margin-bottom:12px}
 h1{font-size:1.45rem;margin-bottom:4px}h2,.weekly-panel>summary{font-size:1.2rem}h2{margin-bottom:8px}
 section p{margin:8px 0}.summaries{gap:10px;margin-top:10px}.summary{padding:12px}
 .week h3{font-size:1rem;margin:10px 0 4px}.week+.week{margin-top:10px;padding-top:6px}
-.metrics{grid-template-columns:repeat(7,minmax(104px,1fr));gap:6px}
+.metrics{grid-template-columns:repeat(8,minmax(104px,1fr));gap:6px}
 .metrics>div{padding:9px;gap:5px;font-size:.875rem;line-height:1.25;overflow-wrap:normal}
 .metrics strong{font-size:1.12rem;font-variant-numeric:tabular-nums}
 label{gap:3px;font-size:.875rem}button,input,select{padding:6px 8px}
 details{margin-top:12px}.weekly-panel>.row{margin-top:10px}td,th{padding:6px 8px}
+.summary{padding:8px 10px}
+.summary h2{margin-bottom:4px}
+.summary p{margin:5px 0}
+.summaries{gap:7px}
+.week+.week{margin-top:7px;padding-top:4px}
+.metrics>div{padding:5px 8px;gap:3px}
 </style>
 <main>
 <header><h1>Contador de horas</h1>Resumo semanal e quadrimestral</header>
@@ -223,10 +229,17 @@ function renderSummary(range, metrics, start, end) {
     .reduce((total, day) => total + (day.values[2] || day.values[0]), 0);
   const sum = i => regularDays.reduce((n,day) => n+day.values[i],0);
   const worked = sum(0);
-  const goal = regularDays.filter(day => !rest(day.type) && !openDay(day)).length*minutes(el('goal').value);
+  const dailyGoal = minutes(el('goal').value);
+  const scheduledDays = regularDays.filter(day => !rest(day.type) && !openDay(day));
+  const goal = scheduledDays.length * dailyGoal;
+  const justifiedCredit = scheduledDays.reduce((total, day) => {
+    const remaining = Math.max(0, dailyGoal - day.values[0]);
+    return total + Math.min(day.values[1] ?? 0, remaining);
+  }, 0);
+  const balance = worked + justifiedCredit - goal;
   const cards = [['Horas trabalhadas', worked], ['Jornada de trabalho', goal],
-    ['Horas excedentes', sum(2)], ['Horas faltantes', sum(4)],
-    ['Repor', Math.max(0, goal - worked)], ['Horas para folgar', Math.max(0, worked - goal)],
+    ['Horas excedentes', sum(2)], ['Horas faltantes', sum(4)], ['Horas justificadas', sum(1)],
+    ['Repor', Math.max(0, -balance)], ['Horas para folgar', Math.max(0, balance)],
     ['Horas extras de sábado', weekendExtra(6) + weekendExtra(0)]];
   metrics.replaceChildren(...cards.map(([label,value]) => {
     const card = document.createElement('div');
